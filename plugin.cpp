@@ -118,18 +118,34 @@ public:
 	}
 
 	virtual void onUserMuteDeafStateChanged(mumble_connection_t connection, mumble_userid_t userID,
-											mumble_mutedeaf_state_t muteDeafState) noexcept override {
+		mumble_mutedeaf_state_t muteDeafState) noexcept override {
 		try {
 			if (!isAlive(connection)) {
 				return;
 			}
-			auto msg    = jsonMessage("event/user_mute_deafen_state_changed");
+			auto msg = jsonMessage("event/user_mute_deafen_state_changed");
 			msg["user"] = jsonGetUser(connection, userID);
 			fillMuteDeafState(msg, muteDeafState);
 			wsBroadcast(msg);
 		}
 		catch (MumbleAPIException e) {
 			handleApiException("onUserMuteDeafStateChanged", e);
+		}
+	}
+
+	virtual void onUserLocalVolumeAdjustmentChanged(mumble_connection_t connection, mumble_userid_t userID,
+		float adjustment) noexcept override {
+		try {
+			if (!isAlive(connection)) {
+				return;
+			}
+			auto msg = jsonMessage("event/user_local_volume_adjustment_changed");
+			msg["user"] = jsonGetUser(connection, userID);
+			msg["adjustment"] = adjustment;
+			wsBroadcast(msg);
+		}
+		catch (MumbleAPIException e) {
+			handleApiException("onUserLocalVolumeAdjustmentChanged", e);
 		}
 	}
 
@@ -251,8 +267,12 @@ public:
 				wsSendJson(connection, msg);
 			} else if (type.compare("request/user_mute_deafen_state") == 0) {
 				wsSendUserMuteDeafState(connection, msg["id"].get< mumble_userid_t >());
+			} else if (type.compare("request/user_local_volume_adjustment") == 0) {
+				wsSendUserLocalVolumeAdjustment(connection, msg["id"].get< mumble_userid_t >());
 			} else if (type.compare("request/set_local_mute") == 0) {
 				handleSetLocalMute(msg["id"].get< mumble_userid_t >(), msg["enable"].get< bool >());
+			} else if (type.compare("request/set_local_volume_adjustment") == 0) {
+				handleSetLocalVolumeAdjustment(msg["id"].get< mumble_userid_t >(), msg["adjustment"].get< float >());
 			}
 		}
 		catch (MumbleAPIException e) {
@@ -284,6 +304,19 @@ public:
 		}
 		catch (MumbleAPIException e) {
 			handleApiException("handleSetLocalMute", e);
+		}
+	}
+
+	void handleSetLocalVolumeAdjustment(mumble_userid_t userID, float adjustment) {
+		try {
+			mumble_connection_t connection = m_api.getActiveServerConnection();
+			if (!isAlive(connection)) {
+				return;
+			}
+			m_api.requestLocalVolumeAdjustment(connection, userID, adjustment);
+		}
+		catch (MumbleAPIException e) {
+			handleApiException("handleSetLocalVolumeAdjustment", e);
 		}
 	}
 
@@ -324,9 +357,11 @@ private:
 
 	json jsonGetUser(mumble_connection_t connection, mumble_userid_t userID) {
 		mumble_mutedeaf_state_t muteDeafState = m_api.getUserMuteDeafState(m_api.getActiveServerConnection(), userID);
-		auto user            = json::object();
-		user["id"]           = userID;
-		user["name"]         = m_api.getUserName(connection, userID);
+		float adjustment = m_api.getUserLocalVolumeAdjustment(m_api.getActiveServerConnection(), userID);
+		auto user					  = json::object();
+		user["id"]					  = userID;
+		user["name"]				  = m_api.getUserName(connection, userID);
+		user["localVolumeAdjustment"] = adjustment;
 		fillMuteDeafState(user, muteDeafState);
 		return user;
 	}
@@ -427,6 +462,14 @@ private:
 		json msg  = jsonMessage("response/user_mute_deafen_state");
 		msg["id"] = userID;
 		fillMuteDeafState(msg, muteDeafState);
+		wsSendJson(wsConnection, msg);
+	}
+
+	void wsSendUserLocalVolumeAdjustment(WsConnection wsConnection, mumble_userid_t userID) {
+		float adjustment = m_api.getUserLocalVolumeAdjustment(m_api.getActiveServerConnection(), userID);
+		json msg = jsonMessage("response/user_local_volume_adjustment");
+		msg["id"] = userID;
+		msg["adjustment"] = adjustment;
 		wsSendJson(wsConnection, msg);
 	}
 
